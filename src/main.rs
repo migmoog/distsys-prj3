@@ -66,7 +66,7 @@ fn main() -> Result<(), Reasons> {
             let mut chan = incoming_channels
                 .get(&pfd.as_fd().as_raw_fd())
                 .expect("Existent channel");
-            let mut buffer = [0; size_of::<Letter>()];
+            let mut buffer = [0; 1024];
             let bytes_read = chan.read(&mut buffer).map_err(Reasons::IO)?;
             let letter: Letter =
                 bincode::deserialize(&buffer[..bytes_read]).map_err(|_| Reasons::BadMessage)?;
@@ -78,14 +78,22 @@ fn main() -> Result<(), Reasons> {
             match letter.message() {
                 // Member requests/confirmations
                 Message::JOIN => data.req_to_members(&mut outgoing_channels)?,
-                Message::OK { .. } => {
-                    if data.all_members_ok() {
+
+                Message::OK {
+                    view_id,
+                    request_id,
+                } => {
+                    if data.all_members_ok(*view_id, *request_id) {
                         data.send_newview(&mut outgoing_channels)?;
                     }
                 }
 
                 // Leader responses
-                Message::REQ(_) => data.send_ok(outgoing_channels.get_mut(&1).unwrap())?,
+                Message::REQ(instruction) => data.send_ok(
+                    &mut outgoing_channels,
+                    instruction.view_id,
+                    instruction.request_id,
+                )?,
                 Message::NEWVIEW { .. } => {
                     // nothing gets sent back at this point
                 }
