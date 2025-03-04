@@ -48,7 +48,7 @@ pub mod messaging {
         }
     }
     impl Letter {
-        pub fn from_who(&self) -> usize {
+        pub fn from_whom(&self) -> usize {
             self.0
         }
         pub fn message(&self) -> &Message {
@@ -63,6 +63,7 @@ pub const LEADER_ID: usize = 1;
 type Channels<W> = HashMap<usize, W>;
 
 #[derive(Default)]
+// stuff only a true leader would need! 👑
 struct Leading {
     requests_count: u32,
     // K: request_id
@@ -70,11 +71,18 @@ struct Leading {
     pending_requests: HashMap<u32, (usize, HashSet<usize>)>,
 }
 
-#[derive(Default)]
 struct Following {
     leader_id: usize,
     // view_ids to match to reqs
     acks: Vec<u32>,
+}
+impl Default for Following {
+    fn default() -> Self {
+        Self {
+            leader_id: 1,
+            acks: Vec::new(),
+        }
+    }
 }
 
 enum Role {
@@ -84,7 +92,6 @@ enum Role {
 
 // main state of each process
 pub struct Data {
-    // stuff only a true leader would need! 👑
     role: Role,
     // membership list recorded across all peers
     memberships: HashMap<u32, HashSet<usize>>,
@@ -121,10 +128,10 @@ impl Data {
             match letter.message() {
                 M::JOIN => {
                     lead.requests_count += 1;
-                    let peer_id = letter.from_who();
+                    let peer_id = letter.from_whom();
                     println!("Got a join from {peer_id}");
                     lead.pending_requests
-                        .insert(lead.requests_count, (peer_id, HashSet::new()));
+                        .insert(lead.requests_count, (peer_id, HashSet::from([1])));
                     self.log.push(LeaderInstruction {
                         request_id: lead.requests_count,
                         view_id: self.view_id,
@@ -136,12 +143,12 @@ impl Data {
                     request_id,
                     view_id,
                 } => {
-                    println!("Got an OK from {}", letter.from_who());
+                    println!("Got an OK from {}", letter.from_whom());
                     let pending_request = lead
                         .pending_requests
                         .get_mut(request_id)
                         .expect("Should receive OK after sending a REQ");
-                    pending_request.1.insert(letter.from_who());
+                    pending_request.1.insert(letter.from_whom());
                     // get the members sent at the same time that the vid was sent
                     let members_at_vid = self.memberships.get(view_id).unwrap();
                     if pending_request.1 == *members_at_vid {
@@ -220,18 +227,42 @@ impl Data {
     }
 
     // Leader methods
-    pub fn all_members_ok(&self, vid: u32, rid: u32) -> bool {
+    fn all_members_ok(&self, instruction: &LeaderInstruction) -> bool {
         if let Role::Leader(ref lead) = self.role {
-            let confirmations = &lead.pending_requests.get(&rid).unwrap().1;
-            let members_at_vid = self.memberships.get(&vid).unwrap();
-            if members_at_vid.len() == 1 && members_at_vid.contains(&self.peer_list.id()) {
-                return true;
-            }
-
+            let confirmations = &lead
+                .pending_requests
+                .get(&instruction.request_id)
+                .unwrap()
+                .1;
+            let members_at_vid = self.memberships.get(&instruction.view_id).unwrap();
             members_at_vid == confirmations
         } else {
             false
         }
+    }
+
+    pub fn flush_instructions(
+        &mut self,
+        outgoing_channels: &mut Channels<impl Write>,
+    ) -> Result<(), Reasons> {
+        let mut log_index = 0;
+        while log_index < self.log.len() {
+            let instruction = &self.log[log_index];
+            if self.all_members_ok(instruction) {
+                self.view_id += 1;
+                let prev_view_id = instruction.view_id;
+                let mut new_members = self.memberships.get(&prev_view_id).unwrap().clone();
+                new_members.insert(instruction.peer_id);
+
+                self.memberships.insert(self.view_id, new_members);
+                self.send_newview(outgoing_channels)?;
+                self.log.remove(log_index);
+                continue;
+            }
+            log_index += 1;
+        }
+
+        Ok(())
     }
 
     pub fn req_to_members(

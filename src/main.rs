@@ -79,14 +79,7 @@ fn main() -> Result<(), Reasons> {
                 // Member requests/confirmations
                 Message::JOIN => data.req_to_members(&mut outgoing_channels)?,
 
-                Message::OK {
-                    view_id,
-                    request_id,
-                } => {
-                    if data.all_members_ok(*view_id, *request_id) {
-                        data.send_newview(&mut outgoing_channels)?;
-                    }
-                }
+                Message::OK { .. } => {}
 
                 // Leader responses
                 Message::REQ(instruction) => data.send_ok(
@@ -98,6 +91,9 @@ fn main() -> Result<(), Reasons> {
                     // nothing gets sent back at this point
                 }
             }
+
+            // if we have any satisfied OKs then send a newview
+            data.flush_instructions(&mut outgoing_channels)?;
         }
     }
 }
