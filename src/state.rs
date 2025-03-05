@@ -26,11 +26,12 @@ pub struct Data {
 
 impl Data {
     pub fn new(peer_list: PeerList) -> Self {
+        let role = Role::new(peer_list.is_leader());
         Self {
             view_id: 1,
             memberships: HashMap::from([(1, HashSet::from([LEADER_ID]))]),
             peer_list,
-            role: Role::new(peer_list.is_leader()),
+            role,
         }
     }
 
@@ -110,7 +111,7 @@ impl Data {
             self.send_message(
                 parcel,
                 outgoing_channels
-                    .get_mut(&follow.leader_id)
+                    .get_mut(&follow.leader_id())
                     .expect("Channel for the leader should exist"),
             )?;
         }

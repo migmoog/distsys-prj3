@@ -43,6 +43,7 @@ impl PeerList {
             .iter()
             .position(|name| *name == self.0)
             .expect("Host should be in hostsfile")
+            + 1
     }
 
     // Returns a slice of all names excluding the host
