@@ -9,12 +9,11 @@ use crate::{failures::Reasons, hostsfile::PeerList};
 pub mod messaging;
 mod roles;
 use messaging::{Instruction, Letter, Message, Operation};
-use roles::*;
+use roles::{PeerId, Role, ViewId};
 pub const LEADER_ID: usize = 1;
 
 type Channels<W> = HashMap<usize, W>;
 // main state of each process
-type ViewId = u32;
 pub struct Data {
     role: Role,
     // membership list recorded across all peers
@@ -41,7 +40,8 @@ impl Data {
 
     /// receives a message from
     pub fn recv_message(&mut self, letter: &Letter) {
-        println!("recv: {:?}", letter);
+        //println!("recv: {:?}", letter);
+
         use messaging::Message as M;
         if let Role::Leader(ref mut lead) = self.role {
             match letter.message() {
@@ -76,8 +76,9 @@ impl Data {
         }
     }
 
-    fn send_message(&self, letter: Letter, sender: &mut impl Write) -> Result<(), Reasons> {
-        println!("send: {:?}", letter);
+    fn send_letter(&self, letter: &Letter, sender: &mut impl Write) -> Result<(), Reasons> {
+        //println!("send: {:?}", letter);
+
         let encoded_buffer = bincode::serialize(&letter).map_err(|_| Reasons::BadMessage)?;
         let _ = sender.write(&encoded_buffer).map_err(Reasons::IO)?;
         Ok(())
@@ -87,7 +88,7 @@ impl Data {
     pub fn ask_to_join(&self, sender: &mut impl Write) -> Result<(), Reasons> {
         assert!(!self.is_leader());
         let parcel: Letter = (self.peer_list.id(), Message::JOIN).into();
-        self.send_message(parcel, sender)?;
+        self.send_letter(&parcel, sender)?;
 
         Ok(())
     }
@@ -99,7 +100,6 @@ impl Data {
         request_id: u32,
     ) -> Result<(), Reasons> {
         if let Role::Follower(ref follow) = self.role {
-            println!("sent an OK");
             let parcel: Letter = (
                 self.peer_list.id(),
                 Message::OK {
@@ -108,8 +108,8 @@ impl Data {
                 },
             )
                 .into();
-            self.send_message(
-                parcel,
+            self.send_letter(
+                &parcel,
                 outgoing_channels
                     .get_mut(&follow.leader_id())
                     .expect("Channel for the leader should exist"),
@@ -130,6 +130,7 @@ impl Data {
         self.view_id += 1;
         self.memberships.insert(self.view_id, prev_members);
     }
+
     pub fn flush_instructions(
         &mut self,
         outgoing_channels: &mut Channels<impl Write>,
@@ -152,14 +153,15 @@ impl Data {
         outgoing_channels: &mut Channels<impl Write>,
     ) -> Result<(), Reasons> {
         if let Role::Leader(ref lead) = self.role {
-            let instr = lead.instr_from_req(lead.latest_request());
-
+            let instr = lead.current_req();
             let confirmers = self.memberships.get(&instr.view_id).unwrap();
-            for (id, channel) in outgoing_channels
+            let letter = (self.peer_list.id(), Message::REQ(instr)).into();
+
+            for (_, channel) in outgoing_channels
                 .iter_mut()
                 .filter(|(id, _)| confirmers.contains(id))
             {
-                self.send_message((self.peer_list.id(), Message::REQ(instr)).into(), channel)?;
+                self.send_letter(&letter, channel)?;
             }
         }
         Ok(())
@@ -171,21 +173,20 @@ impl Data {
     ) -> Result<(), Reasons> {
         if let Role::Leader(_) = self.role {
             let current_members = self.memberships.get(&self.view_id).unwrap();
-            for (id, channel) in outgoing_channels
+            let letter = (
+                self.peer_list.id(),
+                Message::NEWVIEW {
+                    view_id: self.view_id,
+                    members: current_members.clone(),
+                },
+            )
+                .into();
+
+            for (_, channel) in outgoing_channels
                 .iter_mut()
                 .filter(|(id, _)| current_members.contains(id))
             {
-                self.send_message(
-                    (
-                        self.peer_list.id(),
-                        Message::NEWVIEW {
-                            view_id: self.view_id,
-                            members: current_members.clone(),
-                        },
-                    )
-                        .into(),
-                    channel,
-                )?;
+                self.send_letter(&letter, channel)?;
             }
         }
         Ok(())

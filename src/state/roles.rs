@@ -18,6 +18,7 @@ impl Leading {
     pub fn latest_request(&self) -> RequestId {
         self.requests_count
     }
+
     // increments the request_id and creates a list awaiting a new set of confirmations.
     // Starts in a state without ANY. Including the leader.
     pub fn push_request(&mut self, peer_id: PeerId, view_id: ViewId) {
@@ -44,6 +45,16 @@ impl Leading {
             view_id: req.1,
             op: Operation::Add,
         }
+    }
+
+    // choosing the earliest of the pending requests to try and fulfill
+    pub fn current_req(&self) -> Instruction {
+        let lowest_req_id: RequestId = *self
+            .pending_requests
+            .keys()
+            .min()
+            .expect("Should have at least one request");
+        self.instr_from_req(lowest_req_id)
     }
 
     // finds satisfied requests (based on membership lists at the time of request)
