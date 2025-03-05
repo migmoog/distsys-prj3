@@ -10,10 +10,7 @@ use failures::Reasons;
 use hostsfile::PeerList;
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use socketry::{bind_listener, make_channels};
-use state::{
-    messaging::{Letter, Message},
-    Data,
-};
+use state::{messaging::*, Data};
 
 mod args;
 mod failures;
@@ -43,8 +40,6 @@ fn main() -> Result<(), Reasons> {
     let mut data = Data::new(peer_list);
 
     if !data.is_leader() {
-        println!("asked to join");
-
         data.ask_to_join(
             outgoing_channels
                 .get_mut(&1)
