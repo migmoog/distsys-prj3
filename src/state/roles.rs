@@ -3,7 +3,6 @@ use std::collections::{HashMap, HashSet};
 use crate::{Instruction, Operation};
 
 use super::LEADER_ID;
-pub type Channels<W> = HashMap<usize, W>;
 pub type PeerId = usize;
 pub type ViewId = u32;
 pub type RequestId = u32;
@@ -60,6 +59,11 @@ impl Leading {
                 reqs_to_delete.push(*req_id);
                 out.push(*peer_id);
             }
+        }
+
+        // clean up satisfied requests
+        for req_id in reqs_to_delete {
+            self.pending_requests.remove(&req_id);
         }
         out
     }
