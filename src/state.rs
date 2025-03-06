@@ -40,7 +40,7 @@ impl Data {
 
     /// receives a message from
     pub fn recv_message(&mut self, letter: &Letter) {
-        //println!("recv: {:?}", letter);
+        println!("recv: {:?}", letter);
 
         use messaging::Message as M;
         if let Role::Leader(ref mut lead) = self.role {
@@ -59,7 +59,9 @@ impl Data {
             }
         } else if let Role::Follower(ref mut follow) = self.role {
             match letter.message() {
-                M::REQ(instruction) => {}
+                M::REQ(instr) => {
+                    follow.push_instruction(*instr);
+                }
                 M::NEWVIEW { view_id, members } => {
                     self.view_id = *view_id;
                     eprintln!(
@@ -77,7 +79,7 @@ impl Data {
     }
 
     fn send_letter(&self, letter: &Letter, sender: &mut impl Write) -> Result<(), Reasons> {
-        //println!("send: {:?}", letter);
+        println!("send: {:?}", letter);
 
         let encoded_buffer = bincode::serialize(&letter).map_err(|_| Reasons::BadMessage)?;
         let _ = sender.write(&encoded_buffer).map_err(Reasons::IO)?;
@@ -89,32 +91,6 @@ impl Data {
         assert!(!self.is_leader());
         let parcel: Letter = (self.peer_list.id(), Message::JOIN).into();
         self.send_letter(&parcel, sender)?;
-
-        Ok(())
-    }
-
-    pub fn send_ok(
-        &self,
-        outgoing_channels: &mut Channels<impl Write>,
-        view_id: u32,
-        request_id: u32,
-    ) -> Result<(), Reasons> {
-        if let Role::Follower(ref follow) = self.role {
-            let parcel: Letter = (
-                self.peer_list.id(),
-                Message::OK {
-                    request_id,
-                    view_id,
-                },
-            )
-                .into();
-            self.send_letter(
-                &parcel,
-                outgoing_channels
-                    .get_mut(&follow.leader_id())
-                    .expect("Channel for the leader should exist"),
-            )?;
-        }
 
         Ok(())
     }
@@ -135,33 +111,49 @@ impl Data {
         &mut self,
         outgoing_channels: &mut Channels<impl Write>,
     ) -> Result<(), Reasons> {
-        match self.role {
-            Role::Leader(ref mut lead) => {
-                for to_add in lead.evaluate_requests(&self.memberships) {
-                    self.push_new_view(to_add);
-                    self.update_views(outgoing_channels)?;
-                }
+        if let Role::Leader(ref mut lead) = self.role {
+            if let Some(Instruction { peer_id, .. }) = lead.check_req_complete(&self.memberships) {
+                self.push_new_view(peer_id);
+                self.update_views(outgoing_channels)?;
             }
-            Role::Follower(ref mut follow) => {}
+        } else if let Role::Follower(ref mut follow) = self.role {
+            let leader_id = follow.leader_id();
+            if let Some(ack_instr) = follow.send_ok() {
+                self.send_letter(
+                    &(
+                        self.peer_list.id(),
+                        Message::OK {
+                            request_id: ack_instr.request_id,
+                            view_id: ack_instr.view_id,
+                        },
+                    )
+                        .into(),
+                    outgoing_channels.get_mut(&leader_id).unwrap(),
+                )?;
+            }
         }
         Ok(())
     }
 
-    // sends a req messages to all peers in the list
-    pub fn req_to_members(
+    pub fn proceed_reqs(
         &mut self,
         outgoing_channels: &mut Channels<impl Write>,
     ) -> Result<(), Reasons> {
-        if let Role::Leader(ref lead) = self.role {
-            let instr = lead.current_req();
-            let confirmers = self.memberships.get(&instr.view_id).unwrap();
-            let letter = (self.peer_list.id(), Message::REQ(instr)).into();
+        if let Role::Leader(ref mut lead) = self.role {
+            // check if lead isnt waiting for any reqs
+            // check if we have one ready to send
+            // send out reqs
+            if lead.can_proceed() {
+                let msg = lead.start_req();
+                let letter: Letter = (self.peer_list.id(), Message::REQ(msg)).into();
 
-            for (_, channel) in outgoing_channels
-                .iter_mut()
-                .filter(|(id, _)| confirmers.contains(id))
-            {
-                self.send_letter(&letter, channel)?;
+                let current_members = self.memberships.get(&self.view_id).unwrap();
+                for (_, channel) in outgoing_channels
+                    .iter_mut()
+                    .filter(|(id, _)| current_members.contains(id))
+                {
+                    self.send_letter(&letter, channel)?;
+                }
             }
         }
         Ok(())

@@ -70,25 +70,11 @@ fn main() -> Result<(), Reasons> {
 
         for letter in message_queue {
             data.recv_message(&letter);
-            match letter.message() {
-                // Member requests/confirmations
-                Message::JOIN => data.req_to_members(&mut outgoing_channels)?,
-
-                Message::OK { .. } => {}
-
-                // Leader responses
-                Message::REQ(instruction) => data.send_ok(
-                    &mut outgoing_channels,
-                    instruction.view_id,
-                    instruction.request_id,
-                )?,
-                Message::NEWVIEW { .. } => {
-                    // nothing gets sent back at this point
-                }
-            }
-
-            // if we have any satisfied OKs then send a newview
-            data.flush_instructions(&mut outgoing_channels)?;
         }
+        // send out any reqs we may need to take care of
+        data.proceed_reqs(&mut outgoing_channels)?;
+
+        // if we have any satisfied OKs then send a newview
+        data.flush_instructions(&mut outgoing_channels)?;
     }
 }

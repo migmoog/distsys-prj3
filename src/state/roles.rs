@@ -8,8 +8,10 @@ pub type ViewId = u32;
 pub type RequestId = u32;
 
 // stuff only a true leader would need! 👑
+#[derive(Default, Debug)]
 pub struct Leading {
     requests_count: RequestId,
+    waiting_for: Option<RequestId>,
     // K: request_id
     // V: (peer id to add, confirmed Oks)
     pending_requests: HashMap<RequestId, (PeerId, ViewId, HashSet<PeerId>)>,
@@ -25,6 +27,8 @@ impl Leading {
         self.requests_count += 1;
         self.pending_requests
             .insert(self.requests_count, (peer_id, view_id, HashSet::new()));
+
+        println!("PUSH_REQ: {:?}", self);
     }
 
     // adds the peer_id to the confirmations in the members list.
@@ -36,8 +40,14 @@ impl Leading {
             });
     }
 
-    // converts a pending request to an Instruction
-    pub fn instr_from_req(&self, request_id: RequestId) -> Instruction {
+    /// Check if the leader is not waiting on confirmations from another request
+    pub fn can_proceed(&self) -> bool {
+        self.waiting_for.is_none()
+    }
+
+    pub fn start_req(&mut self) -> Instruction {
+        let request_id = *self.pending_requests.keys().min().unwrap();
+        self.waiting_for = Some(request_id);
         let req = self.pending_requests.get(&request_id).unwrap();
         Instruction {
             request_id,
@@ -47,45 +57,55 @@ impl Leading {
         }
     }
 
-    // choosing the earliest of the pending requests to try and fulfill
-    pub fn current_req(&self) -> Instruction {
-        let lowest_req_id: RequestId = *self
-            .pending_requests
-            .keys()
-            .min()
-            .expect("Should have at least one request");
-        self.instr_from_req(lowest_req_id)
-    }
-
-    // finds satisfied requests (based on membership lists at the time of request)
-    // and returns a vec of peer_ids to be added
-    pub fn evaluate_requests(
+    pub fn check_req_complete(
         &mut self,
         memberships: &HashMap<ViewId, HashSet<PeerId>>,
-    ) -> Vec<PeerId> {
-        let mut reqs_to_delete: Vec<RequestId> = Vec::new();
-        let mut out = Vec::new();
-        for (req_id, (peer_id, view_id, confirmations)) in self.pending_requests.iter() {
-            if confirmations == memberships.get(&view_id).unwrap() {
-                reqs_to_delete.push(*req_id);
-                out.push(*peer_id);
-            }
-        }
+    ) -> Option<Instruction> {
+        if let Some(request_id) = self.waiting_for {
+            let req = self.pending_requests.get(&request_id).unwrap();
+            let members = memberships
+                .get(&req.1)
+                .expect("View should exist in memberships");
 
-        // clean up satisfied requests
-        for req_id in reqs_to_delete {
-            self.pending_requests.remove(&req_id);
+            if req.2 == *members {
+                self.waiting_for = None;
+                let val = self.pending_requests.remove(&request_id);
+                println!("REQ_COMPLETE: {:?}", val);
+                val.map(|v| Instruction {
+                    request_id,
+                    peer_id: v.0,
+                    view_id: v.1,
+                    op: Operation::Add,
+                })
+            } else {
+                None
+            }
+        } else {
+            None
         }
-        out
     }
 }
 
 pub struct Following {
     leader_id: PeerId,
+    ack_queue: HashMap<RequestId, Instruction>,
 }
 impl Following {
     pub fn leader_id(&self) -> PeerId {
         self.leader_id
+    }
+
+    pub fn push_instruction(&mut self, instr: Instruction) {
+        self.ack_queue.insert(instr.request_id, instr);
+    }
+
+    // finds the earliest request and removes it from the queue
+    pub fn send_ok(&mut self) -> Option<Instruction> {
+        if let Some(&lowest_req) = self.ack_queue.keys().min() {
+            self.ack_queue.remove(&lowest_req)
+        } else {
+            None
+        }
     }
 }
 
@@ -96,13 +116,11 @@ pub enum Role {
 impl Role {
     pub fn new(is_leader: bool) -> Self {
         if is_leader {
-            Self::Leader(Leading {
-                requests_count: 0,
-                pending_requests: HashMap::new(),
-            })
+            Self::Leader(Leading::default())
         } else {
             Self::Follower(Following {
                 leader_id: LEADER_ID,
+                ack_queue: HashMap::new(),
             })
         }
     }
