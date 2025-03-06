@@ -8,10 +8,10 @@ pub struct Project3 {
     pub hostsfile: PathBuf,
 
     #[arg(short = 'd')]
-    pub start_delay: Option<u32>,
+    pub start_delay: Option<u64>,
 
     #[arg(short = 'c')]
-    pub join_delay: Option<u32>,
+    pub crash_delay: Option<u64>,
 
     #[arg(short = 't')]
     pub testcase4: bool,
