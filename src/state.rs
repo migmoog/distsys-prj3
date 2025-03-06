@@ -40,7 +40,7 @@ impl Data {
 
     /// receives a message from
     pub fn recv_message(&mut self, letter: &Letter) {
-        println!("recv: {:?}", letter);
+        //println!("recv: {:?}", letter);
 
         use messaging::Message as M;
         if let Role::Leader(ref mut lead) = self.role {
@@ -79,7 +79,7 @@ impl Data {
     }
 
     fn send_letter(&self, letter: &Letter, sender: &mut impl Write) -> Result<(), Reasons> {
-        println!("send: {:?}", letter);
+        //println!("send: {:?}", letter);
 
         let encoded_buffer = bincode::serialize(&letter).map_err(|_| Reasons::BadMessage)?;
         let _ = sender.write(&encoded_buffer).map_err(Reasons::IO)?;

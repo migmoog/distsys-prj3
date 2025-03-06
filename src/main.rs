@@ -2,6 +2,8 @@ use std::{
     collections::HashMap,
     io::Read,
     os::fd::{AsFd, AsRawFd},
+    thread::sleep,
+    time::Duration,
 };
 
 use args::Project3;
@@ -37,9 +39,12 @@ fn main() -> Result<(), Reasons> {
         .map(|(_, s)| PollFd::new(s.as_fd(), PollFlags::POLLIN))
         .collect();
 
+    let id = peer_list.id();
     let mut data = Data::new(peer_list);
 
     if !data.is_leader() {
+        // Hacky but I DONT CARE
+        sleep(Duration::from_secs(id as u64 - 1));
         data.ask_to_join(
             outgoing_channels
                 .get_mut(&1)

@@ -28,7 +28,7 @@ impl Leading {
         self.pending_requests
             .insert(self.requests_count, (peer_id, view_id, HashSet::new()));
 
-        println!("PUSH_REQ: {:?}", self);
+        //println!("PUSH_REQ: {:?}", self);
     }
 
     // adds the peer_id to the confirmations in the members list.
@@ -42,7 +42,7 @@ impl Leading {
 
     /// Check if the leader is not waiting on confirmations from another request
     pub fn can_proceed(&self) -> bool {
-        self.waiting_for.is_none()
+        self.waiting_for.is_none() && self.pending_requests.len() > 0
     }
 
     pub fn start_req(&mut self) -> Instruction {
@@ -70,7 +70,7 @@ impl Leading {
             if req.2 == *members {
                 self.waiting_for = None;
                 let val = self.pending_requests.remove(&request_id);
-                println!("REQ_COMPLETE: {:?}", val);
+                //println!("REQ_COMPLETE: {:?}", val);
                 val.map(|v| Instruction {
                     request_id,
                     peer_id: v.0,
