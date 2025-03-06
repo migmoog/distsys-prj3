@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     io::Write,
+    time::Duration,
     usize,
 };
 
@@ -11,6 +12,7 @@ mod roles;
 use messaging::{Instruction, Letter, Message, Operation};
 use roles::{PeerId, Role, ViewId};
 pub const LEADER_ID: usize = 1;
+const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(1);
 
 type Channels<W> = HashMap<usize, W>;
 // main state of each process
@@ -34,10 +36,6 @@ impl Data {
         }
     }
 
-    pub fn is_leader(&self) -> bool {
-        matches!(self.role, Role::Leader(_))
-    }
-
     /// receives a message from
     pub fn recv_message(&mut self, letter: &Letter) {
         //println!("recv: {:?}", letter);
@@ -49,10 +47,7 @@ impl Data {
                     lead.push_request(letter.from_whom(), self.view_id);
                     lead.acknowledge_ok(lead.latest_request(), self.peer_list.id());
                 }
-                M::OK {
-                    request_id,
-                    view_id,
-                } => {
+                M::OK { request_id, .. } => {
                     lead.acknowledge_ok(*request_id, letter.from_whom());
                 }
                 _ => unreachable!(),
@@ -69,7 +64,7 @@ impl Data {
                         self.peer_list.id(),
                         self.view_id,
                         follow.leader_id(),
-                        members
+                        members.iter().collect::<Vec<_>>()
                     );
                     self.memberships.insert(self.view_id, members.clone());
                 }
@@ -87,10 +82,16 @@ impl Data {
     }
 
     // member methods
-    pub fn ask_to_join(&self, sender: &mut impl Write) -> Result<(), Reasons> {
-        assert!(!self.is_leader());
-        let parcel: Letter = (self.peer_list.id(), Message::JOIN).into();
-        self.send_letter(&parcel, sender)?;
+    pub fn ask_to_join(&self, outgoing_channels: &mut Channels<impl Write>) -> Result<(), Reasons> {
+        if let Role::Follower(ref follow) = self.role {
+            let parcel: Letter = (self.peer_list.id(), Message::JOIN).into();
+            self.send_letter(
+                &parcel,
+                outgoing_channels
+                    .get_mut(&follow.leader_id())
+                    .expect("Channel to leader"),
+            )?;
+        }
 
         Ok(())
     }
@@ -178,7 +179,7 @@ impl Data {
                 "{{proc_id: {}, view_id: {}, leader: {0}, memb_list: {:?}}}",
                 self.peer_list.id(),
                 self.view_id,
-                current_members
+                current_members.iter().collect::<Vec<_>>()
             );
 
             for (_, channel) in outgoing_channels

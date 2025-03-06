@@ -43,13 +43,7 @@ fn main() -> Result<(), Reasons> {
 
     // i am a great big fool and need to read the project specs more
     sleep(Duration::from_secs(args.start_delay.unwrap_or(0)));
-    if !data.is_leader() {
-        data.ask_to_join(
-            outgoing_channels
-                .get_mut(&1)
-                .expect("Should be a leader process id"),
-        )?;
-    }
+    data.ask_to_join(&mut outgoing_channels)?;
 
     loop {
         if poll(&mut poll_fds, PollTimeout::NONE).map_err(|v| Reasons::IO(v.into()))? == 0 {

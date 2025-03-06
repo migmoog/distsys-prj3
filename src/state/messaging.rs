@@ -1,4 +1,3 @@
-
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
@@ -17,6 +16,7 @@ pub struct Instruction {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Message {
+    // Part 1
     REQ(Instruction),
     JOIN,
     OK {
@@ -27,6 +27,9 @@ pub enum Message {
         view_id: u32,
         members: HashSet<usize>,
     },
+
+    // Part 2
+    HEARTBEAT,
 }
 
 // Need this because as far as I know there isn't a way to get the from
