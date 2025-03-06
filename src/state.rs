@@ -174,6 +174,13 @@ impl Data {
             )
                 .into();
 
+            eprintln!(
+                "{{proc_id: {}, view_id: {}, leader: {0}, memb_list: {:?}}}",
+                self.peer_list.id(),
+                self.view_id,
+                current_members
+            );
+
             for (_, channel) in outgoing_channels
                 .iter_mut()
                 .filter(|(id, _)| current_members.contains(id))
