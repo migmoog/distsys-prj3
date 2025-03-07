@@ -2,10 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{Instruction, Operation};
 
-use super::LEADER_ID;
-pub type PeerId = usize;
-pub type ViewId = u32;
-pub type RequestId = u32;
+use super::{PeerId, RequestId, ViewId, LEADER_ID};
 
 // stuff only a true leader would need! 👑
 #[derive(Default, Debug)]
@@ -27,8 +24,6 @@ impl Leading {
         self.requests_count += 1;
         self.pending_requests
             .insert(self.requests_count, (peer_id, view_id, HashSet::new()));
-
-        //println!("PUSH_REQ: {:?}", self);
     }
 
     // adds the peer_id to the confirmations in the members list.

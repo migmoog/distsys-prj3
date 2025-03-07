@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
-    net::{TcpListener, TcpStream},
+    io::{Read, Write},
+    net::{TcpListener, TcpStream, UdpSocket},
     thread::sleep,
     time::Duration,
 };
@@ -11,43 +12,44 @@ const PORT: &'static str = "6969";
 const MAX_ATTEMPTS: i32 = 10;
 const ATTEMPT_WAIT: Duration = Duration::from_secs(5);
 
-fn connect_channel(to_send: &str) -> Result<TcpStream, Reasons> {
-    let mut sender_attempts = 0;
-    let sendable_address = format!("{}:{}", to_send, PORT);
+pub fn make_addr(peer_name: &str) -> String {
+    format!("{}:{}", peer_name, PORT)
+}
 
-    let sender = loop {
-        match TcpStream::connect(&sendable_address) {
+// to decomplicate things
+fn attempt_op<Socket, F>(op: F, peer_name: &str) -> Result<Socket, Reasons>
+where
+    F: Fn(String) -> std::io::Result<Socket>,
+{
+    let mut attempts = 0;
+
+    let sock = loop {
+        match op(make_addr(peer_name)) {
             Ok(s) => break s,
             Err(e) => {
-                if sender_attempts == MAX_ATTEMPTS {
+                if attempts == MAX_ATTEMPTS {
                     return Err(Reasons::IO(e));
                 }
-                sender_attempts += 1;
+                attempts += 1;
                 sleep(ATTEMPT_WAIT);
             }
         }
     };
-    Ok(sender)
+    Ok(sock)
+}
+
+fn connect_channel(to_send: &str) -> Result<TcpStream, Reasons> {
+    attempt_op(TcpStream::connect, to_send)
 }
 
 // Sets up a TCPListener to await connections from all peers
 pub fn bind_listener(hostname: &str) -> Result<TcpListener, Reasons> {
-    let mut sender_attempts = 0;
-    let sendable_address = format!("{}:{}", hostname, PORT);
+    attempt_op(TcpListener::bind, hostname)
+}
 
-    let sender = loop {
-        match TcpListener::bind(&sendable_address) {
-            Ok(s) => break s,
-            Err(e) => {
-                if sender_attempts == MAX_ATTEMPTS {
-                    return Err(Reasons::IO(e));
-                }
-                sender_attempts += 1;
-                sleep(ATTEMPT_WAIT);
-            }
-        }
-    };
-    Ok(sender)
+// Sets up the broadcaster for sending heartbeats
+pub fn setup_broadcaster(hostname: &str) -> Result<UdpSocket, Reasons> {
+    attempt_op(UdpSocket::bind, hostname)
 }
 
 // creates a vector of listening and sending sockets

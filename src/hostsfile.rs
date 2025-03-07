@@ -1,5 +1,10 @@
-use crate::failures::Reasons;
-use std::{fs::File, io::Read, path::PathBuf};
+use crate::{
+    failures::Reasons,
+    socketry::{make_addr, setup_broadcaster},
+    state::PeerId,
+    Letter,
+};
+use std::{collections::HashSet, fs::File, io::Read, net::UdpSocket, path::PathBuf};
 
 // Decouples a stage and organizes code better
 pub struct PeerList(String, Vec<String>);
@@ -60,5 +65,34 @@ impl PeerList {
     /// Count of peers this process has (excludes host from list)
     pub fn len(&self) -> usize {
         self.1.len() - 1
+    }
+
+    /// Check if the peer ids in the current membership matches the ones in the list
+    pub fn members_match_hosts(&self, current_members: &HashSet<PeerId>) -> bool {
+        self.1
+            .iter()
+            .enumerate()
+            .map(|(index, _)| index + 1)
+            .collect::<HashSet<PeerId>>()
+            == *current_members
+    }
+
+    /// bind a UDP socket to the host
+    pub fn make_broadcaster(&self) -> Result<UdpSocket, Reasons> {
+        setup_broadcaster(&self.0)
+    }
+
+    pub fn broadcast_letter(
+        &self,
+        broadcaster: &mut UdpSocket,
+        letter: &Letter,
+    ) -> Result<(), Reasons> {
+        let encoded_buffer = bincode::serialize(letter).map_err(|_| Reasons::BadMessage)?;
+        for (_, peer_name) in self.ids_and_names() {
+            broadcaster
+                .send_to(&encoded_buffer, make_addr(peer_name))
+                .map_err(Reasons::IO)?;
+        }
+        Ok(())
     }
 }

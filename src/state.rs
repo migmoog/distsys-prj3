@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     io::Write,
+    net::UdpSocket,
     time::Duration,
     usize,
 };
@@ -10,14 +11,24 @@ use crate::{failures::Reasons, hostsfile::PeerList};
 pub mod messaging;
 mod roles;
 use messaging::{Instruction, Letter, Message, Operation};
-use roles::{PeerId, Role, ViewId};
+use roles::Role;
+
+pub type PeerId = usize;
+pub type ViewId = u32;
+pub type RequestId = u32;
 pub const LEADER_ID: usize = 1;
-const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(1);
+
+enum LifeCycle {
+    Born,              // state before all other processes are in membership list
+    Living(UdpSocket), // sending heartbeats to all other processes
+    Dead,              // crashed and no longer sending heartbeats
+}
 
 type Channels<W> = HashMap<usize, W>;
 // main state of each process
 pub struct Data {
     role: Role,
+    status: LifeCycle,
     // membership list recorded across all peers
     memberships: HashMap<ViewId, HashSet<PeerId>>,
     // log of operations to perform
@@ -30,6 +41,7 @@ impl Data {
         let role = Role::new(peer_list.is_leader());
         Self {
             view_id: 1,
+            status: LifeCycle::Born,
             memberships: HashMap::from([(1, HashSet::from([LEADER_ID]))]),
             peer_list,
             role,
@@ -131,6 +143,18 @@ impl Data {
                         .into(),
                     outgoing_channels.get_mut(&leader_id).unwrap(),
                 )?;
+            }
+        }
+
+        if let Some(current_members) = self.memberships.get(&self.view_id) {
+            match &self.status {
+                // once we have all our members we need, we can start sending heartbeats
+                LifeCycle::Born if self.peer_list.members_match_hosts(current_members) => {
+                    self.status = LifeCycle::Living(self.peer_list.make_broadcaster()?);
+                }
+                LifeCycle::Living(ref broadcaster) => {}
+                LifeCycle::Dead => {}
+                _ => {}
             }
         }
         Ok(())
