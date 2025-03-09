@@ -169,7 +169,7 @@ impl Data {
                 // sleep to allow other processes to change their states
                 sleep(Duration::from_secs(2));
 
-                let LifeCycle::Living(ref heart) = &self.status else {
+                let LifeCycle::Living(ref mut heart) = &mut self.status else {
                     unreachable!(); // just instanced this
                 };
                 let beat_stop = heart.start(HEARTBEAT_PERIOD);
