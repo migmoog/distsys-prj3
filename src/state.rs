@@ -1,28 +1,26 @@
 use std::{
     collections::{HashMap, HashSet},
     io::Write,
-    net::UdpSocket,
+    thread::{self, sleep},
     time::Duration,
     usize,
 };
 
 use crate::{failures::Reasons, hostsfile::PeerList};
 
+mod lifecycle;
 pub mod messaging;
 mod roles;
+
+use lifecycle::{Heart, LifeCycle};
 use messaging::{Instruction, Letter, Message, Operation};
 use roles::Role;
 
 pub type PeerId = usize;
 pub type ViewId = u32;
 pub type RequestId = u32;
-pub const LEADER_ID: usize = 1;
-
-enum LifeCycle {
-    Born,              // state before all other processes are in membership list
-    Living(UdpSocket), // sending heartbeats to all other processes
-    Dead,              // crashed and no longer sending heartbeats
-}
+pub const DEFAULT_LEADER_ID: usize = 1;
+const HEARTBEAT_PERIOD: Duration = Duration::from_secs(2);
 
 type Channels<W> = HashMap<usize, W>;
 // main state of each process
@@ -34,17 +32,19 @@ pub struct Data {
     // log of operations to perform
     view_id: ViewId,
     peer_list: PeerList,
+    crash_delay: Option<Duration>,
 }
 
 impl Data {
-    pub fn new(peer_list: PeerList) -> Self {
+    pub fn new(peer_list: PeerList, crash_delay: Option<u64>) -> Self {
         let role = Role::new(peer_list.is_leader());
         Self {
             view_id: 1,
             status: LifeCycle::Born,
-            memberships: HashMap::from([(1, HashSet::from([LEADER_ID]))]),
+            memberships: HashMap::from([(1, HashSet::from([DEFAULT_LEADER_ID]))]),
             peer_list,
             role,
+            crash_delay: crash_delay.map(Duration::from_secs),
         }
     }
 
@@ -108,7 +108,9 @@ impl Data {
         Ok(())
     }
 
-    // Leader methods
+    // Leader methods //
+
+    // increments view_id and adds a new member to the list
     fn push_new_view(&mut self, to_add: PeerId) {
         let mut prev_members = self
             .memberships
@@ -120,14 +122,25 @@ impl Data {
         self.memberships.insert(self.view_id, prev_members);
     }
 
+    // Performs all operations in the queue.
+    // Also transitions to sending heartbeat once every peer in the hostsfile joins.
     pub fn flush_instructions(
         &mut self,
         outgoing_channels: &mut Channels<impl Write>,
     ) -> Result<(), Reasons> {
+        // Regular instruction flushing
+        use Operation as O;
         if let Role::Leader(ref mut lead) = self.role {
-            if let Some(Instruction { peer_id, .. }) = lead.check_req_complete(&self.memberships) {
-                self.push_new_view(peer_id);
-                self.update_views(outgoing_channels)?;
+            // pop an instruction of the queue after we've gotten all our confirmations
+            if let Some(Instruction { peer_id, op, .. }) =
+                lead.check_req_complete(&self.memberships)
+            {
+                match op {
+                    O::Add => {
+                        self.push_new_view(peer_id);
+                        self.update_views(outgoing_channels)?;
+                    }
+                }
             }
         } else if let Role::Follower(ref mut follow) = self.role {
             let leader_id = follow.leader_id();
@@ -146,16 +159,48 @@ impl Data {
             }
         }
 
-        if let Some(current_members) = self.memberships.get(&self.view_id) {
-            match &self.status {
-                // once we have all our members we need, we can start sending heartbeats
-                LifeCycle::Born if self.peer_list.members_match_hosts(current_members) => {
-                    self.status = LifeCycle::Living(self.peer_list.make_broadcaster()?);
+        // Preparing to broadcast heartbeats
+        if let (LifeCycle::Born, Some(current_members)) =
+            (&self.status, self.memberships.get(&self.view_id))
+        {
+            // once we have all our members we need, we can start sending heartbeats
+            if self.peer_list.members_match_hosts(current_members) {
+                self.status = LifeCycle::Living(Heart::new(self.peer_list.clone())?);
+                // sleep to allow other processes to change their states
+                sleep(Duration::from_secs(2));
+
+                let LifeCycle::Living(ref heart) = &self.status else {
+                    unreachable!(); // just instanced this
+                };
+                let beat_stop = heart.start(HEARTBEAT_PERIOD);
+
+                if let Some(dur) = self.crash_delay {
+                    let beat_stop = beat_stop;
+                    let (id, vid, lid) = (
+                        self.peer_list.id(),
+                        self.view_id,
+                        match &self.role {
+                            Role::Leader(_) => self.peer_list.id(),
+                            Role::Follower(ref follow) => follow.leader_id(),
+                        },
+                    );
+                    thread::spawn(move || {
+                        sleep(dur);
+                        println!("{{peer_id: {id}, view_id: {vid}, leader: {lid}, message: \"crashing\"}}");
+                        drop(beat_stop);
+                    });
+                } else {
+                    beat_stop.ignore();
                 }
-                LifeCycle::Living(ref broadcaster) => {}
-                LifeCycle::Dead => {}
-                _ => {}
             }
+        }
+        Ok(())
+    }
+
+    pub fn pump_heart(&mut self) -> Result<(), Reasons> {
+        if let LifeCycle::Living(ref heart) = self.status {
+            // cool shit
+            //
         }
         Ok(())
     }

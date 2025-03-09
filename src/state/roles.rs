@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{Instruction, Operation};
 
-use super::{PeerId, RequestId, ViewId, LEADER_ID};
+use super::{PeerId, RequestId, ViewId, DEFAULT_LEADER_ID};
 
 // stuff only a true leader would need! 👑
 #[derive(Default, Debug)]
@@ -114,7 +114,7 @@ impl Role {
             Self::Leader(Leading::default())
         } else {
             Self::Follower(Following {
-                leader_id: LEADER_ID,
+                leader_id: DEFAULT_LEADER_ID,
                 ack_queue: HashMap::new(),
             })
         }

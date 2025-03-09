@@ -4,9 +4,10 @@ use crate::{
     state::PeerId,
     Letter,
 };
-use std::{collections::HashSet, fs::File, io::Read, net::UdpSocket, path::PathBuf};
+use std::{collections::HashSet, fs::File, io::Read, net::UdpSocket, path::PathBuf, sync::Arc};
 
 // Decouples a stage and organizes code better
+#[derive(Clone)]
 pub struct PeerList(String, Vec<String>);
 
 impl PeerList {
@@ -84,7 +85,7 @@ impl PeerList {
 
     pub fn broadcast_letter(
         &self,
-        broadcaster: &mut UdpSocket,
+        broadcaster: &Arc<UdpSocket>,
         letter: &Letter,
     ) -> Result<(), Reasons> {
         let encoded_buffer = bincode::serialize(letter).map_err(|_| Reasons::BadMessage)?;

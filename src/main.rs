@@ -39,10 +39,11 @@ fn main() -> Result<(), Reasons> {
         .map(|(_, s)| PollFd::new(s.as_fd(), PollFlags::POLLIN))
         .collect();
 
-    let mut data = Data::new(peer_list);
+    let start_delay = Duration::from_secs(args.start_delay.unwrap_or(0));
+    let mut data = Data::new(peer_list, args.crash_delay);
 
     // i am a great big fool and need to read the project specs more
-    sleep(Duration::from_secs(args.start_delay.unwrap_or(0)));
+    sleep(start_delay);
     data.ask_to_join(&mut outgoing_channels)?;
 
     loop {
