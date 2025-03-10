@@ -75,5 +75,8 @@ fn main() -> Result<(), Reasons> {
 
         // if we have any satisfied OKs then send a newview
         data.flush_instructions(&mut outgoing_channels)?;
+
+        // Check heartbeats
+        data.validate_peers()?;
     }
 }

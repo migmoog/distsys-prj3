@@ -167,7 +167,7 @@ impl Data {
             if self.peer_list.members_match_hosts(current_members) {
                 self.status = LifeCycle::Living(Heart::new(self.peer_list.clone())?);
                 // sleep to allow other processes to change their states
-                sleep(Duration::from_secs(2));
+                sleep(Duration::from_secs(1));
 
                 let LifeCycle::Living(ref mut heart) = &mut self.status else {
                     unreachable!(); // just instanced this
@@ -197,10 +197,11 @@ impl Data {
         Ok(())
     }
 
-    pub fn pump_heart(&mut self) -> Result<(), Reasons> {
-        if let LifeCycle::Living(ref heart) = self.status {
-            // cool shit
-            //
+    /// If in the living stage, will poll its heart to check
+    /// for heartbeats from its peers
+    pub fn validate_peers(&mut self) -> Result<(), Reasons> {
+        if let LifeCycle::Living(ref mut heart) = &mut self.status {
+            println!("{:?}", heart.check_heartbeat());
         }
         Ok(())
     }

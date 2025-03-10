@@ -1,10 +1,66 @@
-use crate::{
-    failures::Reasons,
-    socketry::{make_addr, setup_broadcaster},
-    state::PeerId,
-    Letter,
+use nix::poll::{self, PollFd, PollFlags, PollTimeout};
+
+use crate::{failures::Reasons, socketry::attempt_op, state::PeerId, Letter, Message};
+use std::{
+    collections::HashSet,
+    fs::File,
+    io::Read,
+    net::UdpSocket,
+    os::fd::{AsFd, AsRawFd},
+    path::PathBuf,
 };
-use std::{collections::HashSet, fs::File, io::Read, net::UdpSocket, path::PathBuf, sync::Arc};
+
+pub struct Broadcaster(Vec<(String, UdpSocket)>, Letter);
+impl Broadcaster {
+    fn new(peer_list: &PeerList) -> Result<Self, Reasons> {
+        let mut heart_port = 6790;
+        let mut scks = Vec::new();
+        for (_, name) in peer_list.ids_and_names() {
+            let sock = attempt_op(
+                UdpSocket::bind,
+                peer_list.hostname(),
+                Some(&heart_port.to_string()),
+            )?;
+            sock.set_nonblocking(true).map_err(Reasons::IO)?;
+            scks.push((format!("{}:{}", name, heart_port), sock));
+            heart_port += 1;
+        }
+        let letter = (peer_list.id(), Message::HEARTBEAT).into();
+        Ok(Self(scks, letter))
+    }
+
+    pub fn beat(&self) {
+        let buf = bincode::serialize(&self.1).unwrap();
+        let mut poll_fds: Vec<PollFd> = self
+            .0
+            .iter()
+            .map(|s| PollFd::new(s.1.as_fd(), PollFlags::POLLOUT))
+            .collect();
+
+        let Ok(events) = poll::poll(&mut poll_fds, PollTimeout::NONE) else {
+            return;
+        };
+        if events == 0 {
+            return;
+        }
+
+        for pfd in poll_fds.iter().filter(|pfd| {
+            pfd.revents()
+                .unwrap_or(PollFlags::empty())
+                .contains(PollFlags::POLLOUT)
+        }) {
+            let Some(sock) = self
+                .0
+                .iter()
+                .find(|v| v.1.as_raw_fd() == pfd.as_fd().as_raw_fd())
+            else {
+                unreachable!();
+            };
+            sock.1.send_to(&buf, &sock.0).expect("Successful send");
+            println!("Send to {}", sock.0);
+        }
+    }
+}
 
 // Decouples a stage and organizes code better
 #[derive(Clone)]
@@ -79,21 +135,7 @@ impl PeerList {
     }
 
     /// bind a UDP socket to the host
-    pub fn make_broadcaster(&self) -> Result<UdpSocket, Reasons> {
-        setup_broadcaster(&self.0)
-    }
-
-    pub fn broadcast_letter(
-        &self,
-        broadcaster: &Arc<UdpSocket>,
-        letter: &Letter,
-    ) -> Result<(), Reasons> {
-        let encoded_buffer = bincode::serialize(letter).map_err(|_| Reasons::BadMessage)?;
-        for (_, peer_name) in self.ids_and_names() {
-            broadcaster
-                .send_to(&encoded_buffer, make_addr(peer_name))
-                .map_err(Reasons::IO)?;
-        }
-        Ok(())
+    pub fn make_broadcaster(&self) -> Result<Broadcaster, Reasons> {
+        Broadcaster::new(self)
     }
 }
