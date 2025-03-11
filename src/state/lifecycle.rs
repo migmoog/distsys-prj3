@@ -1,11 +1,12 @@
 use std::{
+    collections::HashMap,
     os::fd::{AsFd, AsRawFd},
     sync::{
         mpsc::{channel, Receiver},
         Arc,
     },
     thread::spawn,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use chrono::TimeDelta;
@@ -17,6 +18,8 @@ use crate::{
     hostsfile::{Broadcaster, PeerList},
     Letter, Message,
 };
+
+use super::PeerId;
 
 // sends stuff real fast real easy
 pub struct Heart {
@@ -97,5 +100,5 @@ impl Heart {
 
 pub enum LifeCycle {
     Born,
-    Living(Heart),
+    Living(Heart, HashMap<PeerId, Instant>),
 }

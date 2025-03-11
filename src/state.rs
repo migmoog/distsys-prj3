@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     io::Write,
     thread::{self, sleep},
-    time::Duration,
+    time::{Duration, Instant},
     usize,
 };
 
@@ -165,11 +165,16 @@ impl Data {
         {
             // once we have all our members we need, we can start sending heartbeats
             if self.peer_list.members_match_hosts(current_members) {
-                self.status = LifeCycle::Living(Heart::new(&self.peer_list)?);
+                let prev_beats = self
+                    .peer_list
+                    .ids_and_names()
+                    .map(|(id, _)| (id, Instant::now()))
+                    .collect();
+                self.status = LifeCycle::Living(Heart::new(&self.peer_list)?, prev_beats);
                 // sleep to allow other processes to change their states
                 sleep(Duration::from_secs(1));
 
-                let LifeCycle::Living(ref mut heart) = &mut self.status else {
+                let LifeCycle::Living(ref mut heart, _) = &mut self.status else {
                     unreachable!(); // just instanced this
                 };
                 let beat_stop = heart.start(HEARTBEAT_PERIOD);
@@ -200,9 +205,10 @@ impl Data {
     /// If in the living stage, will poll its heart to check
     /// for heartbeats from its peers
     pub fn validate_peers(&mut self) -> Result<(), Reasons> {
-        if let LifeCycle::Living(ref mut heart) = &mut self.status {
+        if let LifeCycle::Living(ref mut heart, ref mut prev_beats) = &mut self.status {
             if let Some(letter) = heart.check_heartbeat() {
-                println!("{:?}", letter);
+                prev_beats.insert(letter.from_whom(), Instant::now());
+                println!("{:?}", prev_beats);
             }
         }
         Ok(())
