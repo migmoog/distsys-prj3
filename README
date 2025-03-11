@@ -1,0 +1,7 @@
+Jeremy Gordon
+
+How to run:
+  The project has a `Makefile`, with a target called comp%. Run the target with the corresponding testcase number.
+
+EX:
+make comp1 (runs testcase 1)

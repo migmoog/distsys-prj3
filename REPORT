@@ -1,0 +1,56 @@
+Leadership Implementation:
+
+Data Design (state.rs):
+  - role: an enum of two variants (src/state/roles.rs), Role::Leader & Role::Follower. Each variant has their own respective structures.
+  
+  - status: a `LifeCycle` enum (src/state/lifecycle.rs).
+   - LifeCycle::Born = peer is waiting for itself and other peers to join
+   - LifeCycle::Living(Heart) = peer is alive and using a Heart (in same file) to send HEARTBEAT messages over a set of UDP sockets
+
+  - view_id: monotonically increasing integer that represents the view
+  - memberships: a Map<ViewId, Set<PeerId>>. The key is the previous views and the values are the set of current members ids. Only leaders can make changes and send them to followers.
+
+  - peer_list: A PeerList structure (hostsfile.rs) to help the algorithm read whatever data it needs from the hostsfile
+
+  - crash_delay: An Optional<Duration> (Rust's version of nullable values, this one be a duration of time) that will cause a timed crash for the process it was passed to once it reaches the LifeCycle::Living status. 
+
+Leader Design:
+  - requests_count: A monotonically increasing RequestId to represent the latest request made
+  - waiting_for: an Option<RequestId> representing the current request that the leader is waiting for OK messages from.
+  - pending_requests: Map<RequestId, (Instruction, Set<PeerId>)>, unsatisfied requests waiting to be deleted once all OKs are received. (An Instruction is just a grouping of the RequestId, current ViewId, and Operation to perform). The set is the ids of followers that have sent back their OKs for this request.
+
+Follower Design:
+  - leader_id: PeerId, the current leader's id
+  - ack_queue: Map<RequestId, Instruction>, queue of requests to send back OK messages on.
+
+Heart Design:
+  - On construction, will instance a row of UDP sockets on separate ports for each peer.
+  - Starts two threads, one for asynchronously sending heartbeats (activated in Heart::start) and another for collecting them and sending them over a channel to the main thread.
+  - Heart will get asked to check_heartbeat by the main state and return an Optional<(from: PeerId, message: Message)>
+
+Algorithm Steps:
+
+1. load hostsfile and create PeerList structure (from hostsfile.rs).
+
+2. Set up TCP channels for leader to follower communication.
+
+3. Sleep for the join delay passed in the program args ("-d") then send JOIN message.
+
+4. begin infinite loop, poll channels for any messages
+
+5. If Leader and received a JOIN message, push the new request into the Leader's pending_requests, then send out a REQ message to members.
+
+6. If Follower and received a REQ message, push it onto the ack_queue, then once confirmed send an OK message and remove it from the ack_queue.
+
+7. If Leader and received an OK, add it to the set of confirmations in pending_requests.
+
+8. If Leader, check If the confirmations set is equivalent to the membership set in the current view. If so, performed the saved instruction (Operation::Add or Delete) and send out a NEWVIEW message with the new view_id & membership set.
+
+9. If the peer's status is still LifeCycle::Born and just performed an instruction, check if all the members in the hostsfile have joined the membership list. If so, transition to LifeCycle::Living and create a Heart for broadcasting heartbeats over UDP sockets.
+
+10. start a timer that will send a HEARTBEAT every 2 seconds. If crash_delay is present, start another timed event that will kill the heartbeat timer and crash the process.
+
+11. On receiving a heartbeat, peers will save the std::time::Instant it was received. They will then compare the difference between the current Instant and that of the previous HEARTBEAT. If the difference is greater than 2 seconds, the peer will consider the process crashed and print like so to the console.
+
+12. If Leader and detected a crashed process, prepare an instruction of Operation::Delete and push it onto pending_requests. Follow the same steps and wait for OKs, then send a newview message after getting all confirmations and removing the crashed peer.
+
