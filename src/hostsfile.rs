@@ -10,7 +10,7 @@ use std::{
     path::PathBuf,
 };
 
-pub struct Broadcaster(Vec<(String, UdpSocket)>, Letter);
+pub struct Broadcaster(pub Vec<(String, UdpSocket)>, pub Letter);
 impl Broadcaster {
     fn new(peer_list: &PeerList) -> Result<Self, Reasons> {
         let mut heart_port = 6790;
@@ -57,7 +57,6 @@ impl Broadcaster {
                 unreachable!();
             };
             sock.1.send_to(&buf, &sock.0).expect("Successful send");
-            println!("Send to {}", sock.0);
         }
     }
 }

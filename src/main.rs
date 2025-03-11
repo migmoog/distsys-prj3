@@ -47,36 +47,41 @@ fn main() -> Result<(), Reasons> {
     data.ask_to_join(&mut outgoing_channels)?;
 
     loop {
-        if poll(&mut poll_fds, PollTimeout::NONE).map_err(|v| Reasons::IO(v.into()))? == 0 {
-            continue;
-        }
+        if let Ok(events) =
+            poll(&mut poll_fds, PollTimeout::from(10u16)).map_err(|v| Reasons::IO(v.into()))
+        {
+            if events > 0 {
+                let mut message_queue = Vec::new();
+                for pfd in poll_fds.iter().filter(|pfd| {
+                    pfd.revents()
+                        .unwrap_or(PollFlags::empty())
+                        .contains(PollFlags::POLLIN)
+                }) {
+                    let mut chan = incoming_channels
+                        .get(&pfd.as_fd().as_raw_fd())
+                        .expect("Existent channel");
+                    let mut buffer = [0; 1024];
+                    let bytes_read = chan.read(&mut buffer).map_err(Reasons::IO)?;
+                    let letter: Letter = bincode::deserialize(&buffer[..bytes_read])
+                        .map_err(|_| Reasons::BadMessage)?;
+                    message_queue.push(letter);
+                }
 
-        let mut message_queue = Vec::new();
-        for pfd in poll_fds.iter().filter(|pfd| {
-            pfd.revents()
-                .unwrap_or(PollFlags::empty())
-                .contains(PollFlags::POLLIN)
-        }) {
-            let mut chan = incoming_channels
-                .get(&pfd.as_fd().as_raw_fd())
-                .expect("Existent channel");
-            let mut buffer = [0; 1024];
-            let bytes_read = chan.read(&mut buffer).map_err(Reasons::IO)?;
-            let letter: Letter =
-                bincode::deserialize(&buffer[..bytes_read]).map_err(|_| Reasons::BadMessage)?;
-            message_queue.push(letter);
-        }
-
-        for letter in message_queue {
-            data.recv_message(&letter);
+                for letter in message_queue {
+                    data.recv_message(&letter);
+                }
+            }
         }
         // send out any reqs we may need to take care of
+        //println!("Proceeding reqs");
         data.proceed_reqs(&mut outgoing_channels)?;
 
         // if we have any satisfied OKs then send a newview
+        //println!("Flushing instructions");
         data.flush_instructions(&mut outgoing_channels)?;
 
         // Check heartbeats
+        //println!("Validating peers");
         data.validate_peers()?;
     }
 }

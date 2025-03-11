@@ -165,7 +165,7 @@ impl Data {
         {
             // once we have all our members we need, we can start sending heartbeats
             if self.peer_list.members_match_hosts(current_members) {
-                self.status = LifeCycle::Living(Heart::new(self.peer_list.clone())?);
+                self.status = LifeCycle::Living(Heart::new(&self.peer_list)?);
                 // sleep to allow other processes to change their states
                 sleep(Duration::from_secs(1));
 
@@ -201,7 +201,9 @@ impl Data {
     /// for heartbeats from its peers
     pub fn validate_peers(&mut self) -> Result<(), Reasons> {
         if let LifeCycle::Living(ref mut heart) = &mut self.status {
-            println!("{:?}", heart.check_heartbeat());
+            if let Some(letter) = heart.check_heartbeat() {
+                println!("{:?}", letter);
+            }
         }
         Ok(())
     }
