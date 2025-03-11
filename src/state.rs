@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     io::Write,
+    process::exit,
     thread::{self, sleep},
     time::{Duration, Instant},
     usize,
@@ -181,18 +182,11 @@ impl Data {
 
                 if let Some(dur) = self.crash_delay {
                     let beat_stop = beat_stop;
-                    let (id, vid, lid) = (
-                        self.peer_list.id(),
-                        self.view_id,
-                        match &self.role {
-                            Role::Leader(_) => self.peer_list.id(),
-                            Role::Follower(ref follow) => follow.leader_id(),
-                        },
-                    );
+                    let (id, vid, lid) = (self.peer_list.id(), self.view_id, self.leader_id());
                     thread::spawn(move || {
                         sleep(dur);
-                        println!("{{peer_id: {id}, view_id: {vid}, leader: {lid}, message: \"crashing\"}}");
                         drop(beat_stop);
+                        println!("{{peer_id: {id}, view_id: {vid}, leader: {lid}, message: \"crashing\"}}");
                     });
                 } else {
                     beat_stop.ignore();
@@ -202,13 +196,47 @@ impl Data {
         Ok(())
     }
 
+    fn leader_id(&self) -> usize {
+        match &self.role {
+            Role::Leader(_) => self.peer_list.id(),
+            Role::Follower(ref follow) => follow.leader_id(),
+        }
+    }
+
     /// If in the living stage, will poll its heart to check
     /// for heartbeats from its peers
     pub fn validate_peers(&mut self) -> Result<(), Reasons> {
+        let lid = self.leader_id();
         if let LifeCycle::Living(ref mut heart, ref mut prev_beats) = &mut self.status {
+            let now = Instant::now();
+            let mut rm = Vec::new();
+            for (&id, &prev) in prev_beats.iter() {
+                let diff = { now - prev }.as_secs();
+                if diff > { HEARTBEAT_PERIOD * 2 }.as_secs() {
+                    eprintln!(
+                        "{{peer_id: {}, view_id: {}, leader: {}, message:\"peer {} unreachable\"}}",
+                        self.peer_list.id(),
+                        self.view_id,
+                        lid,
+                        id,
+                    );
+                    /*println!(
+                        "Time was {:?} > {:?}",
+                        diff,
+                        { 2 * HEARTBEAT_PERIOD }.as_secs()
+                    );*/
+                    rm.push(id);
+                }
+            }
+
+            for rmid in rm {
+                prev_beats.remove(&rmid);
+            }
+
             if let Some(letter) = heart.check_heartbeat() {
-                prev_beats.insert(letter.from_whom(), Instant::now());
-                println!("{:?}", prev_beats);
+                assert!(matches!(letter.message(), Message::HEARTBEAT));
+                let from = letter.from_whom();
+                prev_beats.insert(from, now);
             }
         }
         Ok(())
