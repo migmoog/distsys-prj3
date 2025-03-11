@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
     io::Write,
-    process::exit,
     thread::{self, sleep},
     time::{Duration, Instant},
     usize,
@@ -57,7 +56,7 @@ impl Data {
         if let Role::Leader(ref mut lead) = self.role {
             match letter.message() {
                 M::JOIN => {
-                    lead.push_request(letter.from_whom(), self.view_id);
+                    lead.push_request(letter.from_whom(), self.view_id, Operation::Add);
                     lead.acknowledge_ok(lead.latest_request(), self.peer_list.id());
                 }
                 M::OK { request_id, .. } => {
@@ -112,13 +111,18 @@ impl Data {
     // Leader methods //
 
     // increments view_id and adds a new member to the list
-    fn push_new_view(&mut self, to_add: PeerId) {
+    fn push_new_view(&mut self, peer: PeerId, op: Operation) {
         let mut prev_members = self
             .memberships
             .get(&self.view_id)
             .expect("Should have a view prior to this one existing.")
             .clone();
-        prev_members.insert(to_add);
+
+        if let Operation::Add = op {
+            prev_members.insert(peer);
+        } else if let Operation::Delete = op {
+            assert!(prev_members.remove(&peer));
+        }
         self.view_id += 1;
         self.memberships.insert(self.view_id, prev_members);
     }
@@ -130,18 +134,13 @@ impl Data {
         outgoing_channels: &mut Channels<impl Write>,
     ) -> Result<(), Reasons> {
         // Regular instruction flushing
-        use Operation as O;
         if let Role::Leader(ref mut lead) = self.role {
             // pop an instruction of the queue after we've gotten all our confirmations
             if let Some(Instruction { peer_id, op, .. }) =
                 lead.check_req_complete(&self.memberships)
             {
-                match op {
-                    O::Add => {
-                        self.push_new_view(peer_id);
-                        self.update_views(outgoing_channels)?;
-                    }
-                }
+                self.push_new_view(peer_id, op);
+                self.update_views(outgoing_channels)?;
             }
         } else if let Role::Follower(ref mut follow) = self.role {
             let leader_id = follow.leader_id();
@@ -186,7 +185,7 @@ impl Data {
                     thread::spawn(move || {
                         sleep(dur);
                         drop(beat_stop);
-                        println!("{{peer_id: {id}, view_id: {vid}, leader: {lid}, message: \"crashing\"}}");
+                        eprintln!("{{peer_id: {id}, view_id: {vid}, leader: {lid}, message: \"crashing\"}}");
                     });
                 } else {
                     beat_stop.ignore();
@@ -196,6 +195,7 @@ impl Data {
         Ok(())
     }
 
+    /// Returns the id of the current leader in the system
     fn leader_id(&self) -> usize {
         match &self.role {
             Role::Leader(_) => self.peer_list.id(),
@@ -207,10 +207,14 @@ impl Data {
     /// for heartbeats from its peers
     pub fn validate_peers(&mut self) -> Result<(), Reasons> {
         let lid = self.leader_id();
+        let current_members = self.memberships.get(&self.view_id).unwrap();
         if let LifeCycle::Living(ref mut heart, ref mut prev_beats) = &mut self.status {
             let now = Instant::now();
             let mut rm = Vec::new();
-            for (&id, &prev) in prev_beats.iter() {
+            for (&id, &prev) in prev_beats
+                .iter()
+                .filter(|(id, _)| current_members.contains(id))
+            {
                 let diff = { now - prev }.as_secs();
                 if diff > { HEARTBEAT_PERIOD * 2 }.as_secs() {
                     eprintln!(
@@ -220,16 +224,15 @@ impl Data {
                         lid,
                         id,
                     );
-                    /*println!(
-                        "Time was {:?} > {:?}",
-                        diff,
-                        { 2 * HEARTBEAT_PERIOD }.as_secs()
-                    );*/
                     rm.push(id);
                 }
             }
 
             for rmid in rm {
+                if let Role::Leader(ref mut lead) = self.role {
+                    lead.push_request(rmid, self.view_id, Operation::Delete);
+                    lead.acknowledge_ok(lead.latest_request(), lid);
+                }
                 prev_beats.remove(&rmid);
             }
 

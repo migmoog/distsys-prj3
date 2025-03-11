@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]
 pub enum Operation {
     Add,
+    Delete,
 }
 
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]

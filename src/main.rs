@@ -47,6 +47,10 @@ fn main() -> Result<(), Reasons> {
     data.ask_to_join(&mut outgoing_channels)?;
 
     loop {
+        // Check heartbeats
+        //println!("Validating peers");
+        data.validate_peers()?;
+
         if let Ok(events) =
             poll(&mut poll_fds, PollTimeout::from(10u16)).map_err(|v| Reasons::IO(v.into()))
         {
@@ -79,9 +83,5 @@ fn main() -> Result<(), Reasons> {
         // if we have any satisfied OKs then send a newview
         //println!("Flushing instructions");
         data.flush_instructions(&mut outgoing_channels)?;
-
-        // Check heartbeats
-        //println!("Validating peers");
-        data.validate_peers()?;
     }
 }

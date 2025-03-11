@@ -11,7 +11,7 @@ pub struct Leading {
     waiting_for: Option<RequestId>,
     // K: request_id
     // V: (peer id to add, confirmed Oks)
-    pending_requests: HashMap<RequestId, (PeerId, ViewId, HashSet<PeerId>)>,
+    pending_requests: HashMap<RequestId, (PeerId, ViewId, HashSet<PeerId>, Operation)>,
 }
 impl Leading {
     pub fn latest_request(&self) -> RequestId {
@@ -20,17 +20,17 @@ impl Leading {
 
     // increments the request_id and creates a list awaiting a new set of confirmations.
     // Starts in a state without ANY. Including the leader.
-    pub fn push_request(&mut self, peer_id: PeerId, view_id: ViewId) {
+    pub fn push_request(&mut self, peer_id: PeerId, view_id: ViewId, op: Operation) {
         self.requests_count += 1;
         self.pending_requests
-            .insert(self.requests_count, (peer_id, view_id, HashSet::new()));
+            .insert(self.requests_count, (peer_id, view_id, HashSet::new(), op));
     }
 
     // adds the peer_id to the confirmations in the members list.
     pub fn acknowledge_ok(&mut self, request_id: RequestId, peer_id: PeerId) {
         self.pending_requests
             .entry(request_id)
-            .and_modify(|(_, _, confirmations)| {
+            .and_modify(|(_, _, confirmations, _)| {
                 confirmations.insert(peer_id);
             });
     }
@@ -48,7 +48,7 @@ impl Leading {
             request_id,
             peer_id: req.0,
             view_id: req.1,
-            op: Operation::Add,
+            op: req.3,
         }
     }
 
@@ -70,7 +70,7 @@ impl Leading {
                     request_id,
                     peer_id: v.0,
                     view_id: v.1,
-                    op: Operation::Add,
+                    op: v.3,
                 })
             } else {
                 None
